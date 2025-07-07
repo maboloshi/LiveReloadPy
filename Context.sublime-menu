@@ -1,0 +1,31 @@
+[
+    {
+        "caption": "LiveReload ▶ 启动服务器",
+        "command": "start_live_reload",
+        "context": [
+            { "key": "selector", "operator": "equal", "operand": "text.html" }
+        ]
+    },
+    {
+        "caption": "LiveReload ⏹ 停止服务器",
+        "command": "stop_live_reload",
+        "context": [
+            { "key": "selector", "operator": "equal", "operand": "text.html" }
+        ]
+    },
+    {
+        "caption": "LiveReload 🌐 在浏览器中打开当前文件",
+        "command": "open_in_live_reload",
+        "args": { "event": "context_menu" },
+        "context": [
+            { "key": "selector", "operator": "equal", "operand": "text.html" }
+        ]
+    },
+    {
+        "caption": "LiveReload 👁️ 添加单独监视",
+        "command": "add_single_file_watch",
+        "context": [
+            { "key": "selector", "operator": "equal", "operand": "text.html" }
+        ]
+    }
+]

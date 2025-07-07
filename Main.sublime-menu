@@ -1,0 +1,61 @@
+[
+    {
+        "id": "tools",
+        "children": [
+            {
+                "caption": "LiveReloadPy",
+                "mnemonic": "L",
+                "id": "live_reload_menu",
+                "children": [
+                    {
+                        "caption": "▶ 启动 LiveReload 服务器",
+                        "command": "start_live_reload"
+                    },
+                    {
+                        "caption": "⏹ 停止 LiveReload 服务器",
+                        "command": "stop_live_reload"
+                    },
+                    {
+                        "caption": "🌐 浏览器中打开当前页面",
+                        "command": "open_in_live_reload",
+                        "args": { "event": "menu" }
+                    },
+                    {
+                        "caption": "👁️ 添加单独监视",
+                        "command": "add_single_file_watch"
+                    },
+                    {
+                        "caption": "⚙ 打开 LiveReloadPy 设置",
+                        "command": "open_live_reload_settings"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "id": "preferences",
+        "children": [
+            {
+                "caption": "Package Settings",
+                "mnemonic": "P",
+                "id": "package-settings",
+                "children": [
+                    {
+                        "caption": "LiveReloadPy",
+                        "children": [
+                            {
+                                "caption": "Settings",
+                                "command": "edit_settings",
+                                "args": {
+                                    "base_file": "${packages}/LiveReloadPy/LiveReloadPy.sublime-settings",
+                                    "user_file": "${packages}/User/LiveReloadPy.sublime-settings",
+                                    "default": "// Settings in here override those in \"LiveReloadPy/LiveReloadPy.sublime-settings\"\n{\n\t$0\n}\n"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+]

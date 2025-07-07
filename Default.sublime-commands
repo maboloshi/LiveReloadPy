@@ -1,0 +1,22 @@
+[
+  {
+    "caption": "LiveReloadPy: ▶ 启动服务器",
+    "command": "start_live_reload"
+  },
+  {
+    "caption": "LiveReloadPy: ⏹ 停止服务器",
+    "command": "stop_live_reload"
+  },
+  {
+    "caption": "LiveReloadPy: 🌐 在浏览器中打开当前文件",
+    "command": "open_in_live_reload"
+  },
+  {
+    "caption": "LiveReloadPy: 👁️ 添加单独监视",
+    "command": "add_single_file_watch"
+  },
+  {
+    "caption": "LiveReloadPy: ⚙ 打开插件设置",
+    "command": "open_live_reload_settings"
+  }
+]

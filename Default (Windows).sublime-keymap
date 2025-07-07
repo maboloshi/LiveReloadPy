@@ -1,0 +1,6 @@
+[
+    { "keys": ["ctrl+alt+l"], "command": "start_live_reload" },
+    { "keys": ["ctrl+alt+k"], "command": "stop_live_reload" },
+    { "keys": ["ctrl+alt+o"], "command": "open_in_live_reload" },
+    { "keys": ["ctrl+alt+w"], "command": "add_single_file_watch" }
+]
