@@ -12,24 +12,25 @@ import sublime_plugin
 import socket
 import json
 from livereload import Server
+from tornado.ioloop import IOLoop
 
 # 加载插件设置
 settings = sublime.load_settings("LiveReloadPy.sublime-settings")
 
 
 class LiveServerController:
-    """管理 livereload 服务器生命周期和状态"""
+    """管理 LiveReload 服务器生命周期和状态"""
     _server = None
     _thread = None
     _folder = None
     _port = None
-
-    STATUS_KEY = "live_server_status"
-    CLEAR_DELAY_MS = 3000  # 状态栏消息显示时间
+    _io_loop = None  # 存储 IOLoop 引用
+    _is_stopping = False  # 添加停止状态标志
 
     @classmethod
     def is_running(cls):
-        return cls._server is not None
+        # 检查运行状态时排除正在停止的情况
+        return cls._thread is not None and cls._thread.is_alive() and not cls._is_stopping
 
     @classmethod
     def get_project_settings(cls, folder):
@@ -41,6 +42,7 @@ class LiveServerController:
                     return json.load(f)
             except Exception as e:
                 print(f"读取项目配置错误: {e}")
+                sublime.status_message(f"❌ 读取项目配置错误: {e}")
         return {}
 
     @classmethod
@@ -57,13 +59,16 @@ class LiveServerController:
 
     @classmethod
     def start_server(cls, folder):
-        """启动 livereload 服务器"""
+        """启动 LiveReload 服务器"""
+        # 确保先清理任何可能存在的残留状态
+        cls._cleanup_resources()
+
         if not folder:
-            cls.update_status("❌ 启动失败: 路径为空")
+            sublime.status_message("❌ LiveReload 启动失败: 路径为空")
             return False
 
         if cls.is_running():
-            cls.update_status("⚠️ livereload 已在运行")
+            sublime.status_message("⚠️ LiveReload 已在运行")
             return False
 
         cls._folder = folder
@@ -73,17 +78,18 @@ class LiveServerController:
         ignored_dirs = cls.get_effective_setting("ignore_dirs", [".git", ".svn", "node_modules"])
 
         if not cls.is_port_available(port):
-            cls.update_status(f"❌ 端口 {port} 被占用")
+            sublime.status_message(f"❌ 端口 {port} 被占用")
             return False
 
         def run_server():
             """在独立线程中运行服务器"""
             try:
                 cls._server = Server()
+                # 存储 IOLoop 引用
+                cls._io_loop = IOLoop.current()
 
-                # 添加监视模式（优化性能）
+                # 配置监视器
                 for ext in watch_exts:
-                    # 使用递归匹配模式，提高效率
                     pattern = os.path.join("**", f"*{ext}")
                     cls._server.watch(
                         os.path.join(folder, pattern),
@@ -98,47 +104,95 @@ class LiveServerController:
                     debug=cls.get_effective_setting("debug_mode", False)
                 )
             except Exception as e:
-                cls.update_status(f"❌ 启动失败: {e}")
-                cls._server = None
-                cls._thread = None
+                sublime.status_message(f"❌ LiveReload 启动失败: {e}")
+                return False
+            finally:
+                cls._cleanup_resources()
 
         cls._thread = threading.Thread(target=run_server, daemon=True)
         cls._thread.start()
         cls._port = port
-        cls.update_status(f"✅ livereload 启动: http://127.0.0.1:{port}")
+        sublime.status_message(f"✅ LiveReload 启动: http://127.0.0.1:{port}")
         return True
 
     @classmethod
-    def stop_server(cls):
-        """停止 livereload 服务器"""
-        if not cls.is_running():
-            cls.update_status("⚠️ livereload 未运行")
-            return
-
-        # 停止服务器
-        if hasattr(cls._server, 'application') and hasattr(cls._server.application, 'io_loop'):
-            try:
-                cls._server.application.io_loop.add_callback(
-                    cls._server.application.io_loop.stop
-                )
-            except Exception as e:
-                print(f"停止服务器时出错: {e}")
-
+    def _cleanup_resources(cls):
+        """确保所有资源被正确释放"""
         cls._server = None
         cls._thread = None
-        cls.update_status("🛑 livereload 已停止")
+        cls._io_loop = None
+        cls._folder = None
+        cls._port = None
+        cls._is_stopping = False  # 重置停止标志
+
+    @classmethod
+    def stop_server(cls):
+        """停止 LiveReload 服务器"""
+        if not cls._thread or not cls._thread.is_alive() or cls._is_stopping:
+            sublime.status_message("⚠️ LiveReload 未运行或正在停止")
+            return False
+
+        try:
+            # 设置停止标志防止重复操作
+            cls._is_stopping = True
+
+            # 保存线程引用到局部变量防止提前释放
+            stop_thread = cls._thread
+            io_loop_ref = cls._io_loop
+
+            sublime.status_message("🛑 正在停止 LiveReload...")
+
+            # 尝试优雅停止
+            if io_loop_ref and hasattr(io_loop_ref, 'asyncio_loop'):
+                asyncio_loop = io_loop_ref.asyncio_loop
+                if asyncio_loop.is_running():
+                    # 在正确的线程中停止循环
+                    asyncio_loop.call_soon_threadsafe(asyncio_loop.stop)
+
+            # 等待线程安全退出（最多1秒）
+            if stop_thread.is_alive():
+                stop_thread.join(timeout=1.0)
+
+                # 检查线程是否仍在运行
+                if stop_thread.is_alive():
+                    # 如果优雅停止失败，尝试强制终止
+                    try:
+                        # 这是最后的手段 - 强制关闭所有连接
+                        if cls._server:
+                            if hasattr(cls._server, '_http_server') and cls._server._http_server:
+                                cls._server._http_server.stop()
+
+                            if hasattr(cls._server, '_ws_connection') and cls._server._ws_connection:
+                                cls._server._ws_connection.close()
+                    except Exception as e:
+                        print(f"强制停止失败: {e}")
+                    finally:
+                        sublime.status_message("⚠️ 服务器强制终止")
+                else:
+                    sublime.status_message("🛑 LiveReload 已停止")
+            else:
+                sublime.status_message("🛑 LiveReload 已停止")
+
+            return True
+        except Exception as e:
+            print(f"❌ 停止 LiveReload 出错: {e}")
+            sublime.status_message(f"❌ 停止 LiveReload 出错: {e}")
+            return False
+        finally:
+            # 无论成功与否，都确保释放资源
+            cls._cleanup_resources()
 
     @classmethod
     def open_current_file(cls, view):
         """在浏览器中打开当前文件"""
         if not cls.is_running():
-            cls.update_status("⚠️ 服务未启动")
-            return
+            sublime.status_message("⚠️ 请先启动 LiveReload 服务")
+            return False
 
         file_path = view.file_name()
         if not file_path:
-            cls.update_status("❌ 文件路径无效")
-            return
+            sublime.status_message("❌ 文件路径无效")
+            return False
 
         # 计算相对于服务器根目录的路径
         try:
@@ -148,51 +202,37 @@ class LiveServerController:
             url = f"http://127.0.0.1:{cls._port}/{url_path}"
 
             webbrowser.open_new_tab(url)
-            cls.update_status(f"🌐 打开: {url}")
+            sublime.status_message(f"🌐 打开: {os.path.basename(file_path)}")
+            return True
         except ValueError:
-            cls.update_status("❌ 文件不在项目目录内")
+            sublime.status_message("❌ 文件不在项目目录内")
+            return False
 
     @classmethod
     def add_single_file_watch(cls, view):
         """添加单独文件监视"""
         if not cls.is_running():
-            cls.update_status("⚠️ 请先启动服务器")
-            return
+            sublime.status_message("⚠️ 请先启动 LiveReload 服务")
+            return False
 
         file_path = view.file_name()
         if not file_path:
-            cls.update_status("❌ 文件路径无效")
-            return
+            sublime.status_message("❌ 文件路径无效")
+            return False
 
         try:
             # 添加文件到监视列表
             cls._server.watch(file_path)
-            cls.update_status(f"👁️ 已添加单独监视: {os.path.basename(file_path)}")
+            sublime.status_message(f"👁️ 已添加单独监视: {os.path.basename(file_path)}")
+            return True
         except Exception as e:
-            cls.update_status(f"❌ 添加监视失败: {e}")
-
-    @classmethod
-    def update_status(cls, msg):
-        """更新状态栏信息"""
-        window = sublime.active_window()
-        if not window:
-            return
-        for view in window.views():
-            view.set_status(cls.STATUS_KEY, msg)
-        sublime.set_timeout(lambda: cls.clear_status(), cls.CLEAR_DELAY_MS)
-
-    @classmethod
-    def clear_status(cls):
-        """清除状态栏信息"""
-        window = sublime.active_window()
-        if not window:
-            return
-        for view in window.views():
-            view.erase_status(cls.STATUS_KEY)
+            print(f"❌ 添加监视失败: {e}")
+            sublime.status_message(f"❌ 添加监视失败: {e}")
+            return False
 
 
 class StartLiveReloadCommand(sublime_plugin.WindowCommand):
-    """启动 livereload 服务器"""
+    """启动 LiveReload 服务器"""
     def run(self):
         # 尝试获取项目文件夹或当前文件所在目录
         folders = self.window.folders()
@@ -205,14 +245,14 @@ class StartLiveReloadCommand(sublime_plugin.WindowCommand):
         if folder:
             LiveServerController.start_server(folder)
         else:
-            sublime.status_message("无法确定项目目录")
+            sublime.status_message("❌ 无法确定项目目录")
 
     def is_enabled(self):
         return not LiveServerController.is_running()
 
 
 class StopLiveReloadCommand(sublime_plugin.WindowCommand):
-    """停止 livereload 服务器"""
+    """停止 LiveReload 服务器"""
     def run(self):
         LiveServerController.stop_server()
 
@@ -234,6 +274,9 @@ class AddSingleFileWatchCommand(sublime_plugin.TextCommand):
     def run(self, edit):
         LiveServerController.add_single_file_watch(self.view)
 
+    def is_enabled(self):
+        return LiveServerController.is_running()
+
 
 class OpenLiveReloadSettingsCommand(sublime_plugin.ApplicationCommand):
     """打开插件设置"""
@@ -253,8 +296,4 @@ class LiveReloadListener(sublime_plugin.EventListener):
             )
 
             if file_ext in watch_exts:
-                view.set_status("live_reload_saved", "✔️ 文件已保存，LiveReload 将自动刷新")
-                sublime.set_timeout(
-                    lambda: view.erase_status("live_reload_saved"),
-                    2000
-                )
+                sublime.status_message("✔️ 文件已保存，LiveReload 将自动刷新")
