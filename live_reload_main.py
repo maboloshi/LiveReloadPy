@@ -12,7 +12,6 @@ import sublime_plugin
 import socket
 import json
 from livereload import Server
-from tornado.ioloop import IOLoop
 
 # 加载插件设置
 settings = sublime.load_settings("LiveReloadPy.sublime-settings")
@@ -24,7 +23,6 @@ class LiveServerController:
     _thread = None
     _folder = None
     _port = None
-    _io_loop = None  # 存储 IOLoop 引用
     _is_stopping = False  # 添加停止状态标志
 
     @classmethod
@@ -85,8 +83,6 @@ class LiveServerController:
             """在独立线程中运行服务器"""
             try:
                 cls._server = Server()
-                # 存储 IOLoop 引用
-                cls._io_loop = IOLoop.current()
 
                 # 配置监视器
                 for ext in watch_exts:
@@ -121,10 +117,9 @@ class LiveServerController:
         """确保所有资源被正确释放"""
         cls._server = None
         cls._thread = None
-        cls._io_loop = None
         cls._folder = None
         cls._port = None
-        cls._is_stopping = False  # 重置停止标志
+        cls._is_stopping = False
 
     @classmethod
     def stop_server(cls):
@@ -134,21 +129,17 @@ class LiveServerController:
             return False
 
         try:
-            # 设置停止标志防止重复操作
             cls._is_stopping = True
-
-            # 保存线程引用到局部变量防止提前释放
             stop_thread = cls._thread
-            io_loop_ref = cls._io_loop
 
             sublime.status_message("🛑 正在停止 LiveReload...")
 
-            if io_loop_ref:
+            # 停止 Server 实例（如果支持 .stop）
+            if cls._server and hasattr(cls._server, "stop"):
                 try:
-                    # 安排 loop 停止任务
-                    io_loop_ref.add_callback(io_loop_ref.stop)
+                    cls._server.stop()  # 内部会安排 IOLoop 停止
                 except Exception as e:
-                    print(f"❌ 停止 IOLoop 出错: {e}")
+                    print(f"❌ server.stop() 调用失败: {e}")
 
             # 等待线程退出（主线程不会死锁）
             if stop_thread.is_alive():
