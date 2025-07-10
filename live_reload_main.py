@@ -104,6 +104,7 @@ class LiveServerController:
                     debug=cls.get_effective_setting("debug_mode", False)
                 )
             except Exception as e:
+                print(f"❌ LiveReload 启动失败: {e}")
                 sublime.status_message(f"❌ LiveReload 启动失败: {e}")
                 return False
             finally:
@@ -128,7 +129,7 @@ class LiveServerController:
     @classmethod
     def stop_server(cls):
         """停止 LiveReload 服务器"""
-        if not cls._thread or not cls._thread.is_alive() or cls._is_stopping:
+        if not cls.is_running():
             sublime.status_message("⚠️ LiveReload 未运行或正在停止")
             return False
 
@@ -142,37 +143,18 @@ class LiveServerController:
 
             sublime.status_message("🛑 正在停止 LiveReload...")
 
-            # 尝试优雅停止
-            if io_loop_ref and hasattr(io_loop_ref, 'asyncio_loop'):
-                asyncio_loop = io_loop_ref.asyncio_loop
-                if asyncio_loop.is_running():
-                    # 在正确的线程中停止循环
-                    asyncio_loop.call_soon_threadsafe(asyncio_loop.stop)
+            if io_loop_ref:
+                try:
+                    # 安排 loop 停止任务
+                    io_loop_ref.add_callback(io_loop_ref.stop)
+                except Exception as e:
+                    print(f"❌ 停止 IOLoop 出错: {e}")
 
-            # 等待线程安全退出（最多1秒）
+            # 等待线程退出（主线程不会死锁）
             if stop_thread.is_alive():
                 stop_thread.join(timeout=1.0)
 
-                # 检查线程是否仍在运行
-                if stop_thread.is_alive():
-                    # 如果优雅停止失败，尝试强制终止
-                    try:
-                        # 这是最后的手段 - 强制关闭所有连接
-                        if cls._server:
-                            if hasattr(cls._server, '_http_server') and cls._server._http_server:
-                                cls._server._http_server.stop()
-
-                            if hasattr(cls._server, '_ws_connection') and cls._server._ws_connection:
-                                cls._server._ws_connection.close()
-                    except Exception as e:
-                        print(f"强制停止失败: {e}")
-                    finally:
-                        sublime.status_message("⚠️ 服务器强制终止")
-                else:
-                    sublime.status_message("🛑 LiveReload 已停止")
-            else:
-                sublime.status_message("🛑 LiveReload 已停止")
-
+            sublime.status_message("🛑 LiveReload 已停止")
             return True
         except Exception as e:
             print(f"❌ 停止 LiveReload 出错: {e}")
